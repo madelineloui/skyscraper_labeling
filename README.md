@@ -9,6 +9,8 @@ Follow the instructions at: https://docs.astral.sh/uv/getting-started/installati
 Run:
 
 ```
+uv venv
+source .venv/bin/activate
 uv sync
 ```
 
@@ -20,3 +22,4 @@ uv sync
 streamlit run validation_app.py
 ```
 * Ensure that feedback saves to the `feedback/` folder!
+
