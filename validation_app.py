@@ -139,7 +139,7 @@ def write_feedback(article_id, feedback, note=None):
 
     if feedback is not None:
         df.loc[df["article_id"] == article_id, "visible"] = feedback
-    
+
     if note is not None:
         df.loc[df["article_id"] == article_id, "notes"] = note
 
@@ -281,7 +281,7 @@ st.markdown(f"[📍 {location_name} (Reference)]({maps_link})")
 # =========================
 
 st.subheader(f"{sat_source.capitalize()} Imagery")
-        
+
 # 1) Imagery gallery (with per-image timeline captions from this source rewrite metadata)
 try:
     _start_date = metadata['start_date']
@@ -299,7 +299,7 @@ try:
 except:
     start_date = 'N/A'
     end_date = 'N/A'
-    
+
 image_dir = VAL_DIR / article_id / "imagery"
 render_image_gallery_with_captions(image_dir, sat_timeline, sat_source, None if start_date == 'N/A' else start_date, None if end_date == 'N/A' else end_date)
 
@@ -388,123 +388,156 @@ with col_undo:
 st.markdown("#### Correct event start/end dates (if applicable)")
 with st.expander("Correct Event Dates", expanded=True):
 
-    start_input_value = None
-    end_input_value = None
+    start_key = f"start_date_{article_id}"
+    end_key   = f"end_date_{article_id}"
+
+    # --- Clear widget state ONLY when article changes ---
+    last_article = st.session_state.get("dates_article_id")
+    if last_article != article_id:
+        st.session_state.pop(start_key, None)
+        st.session_state.pop(end_key, None)
+        st.session_state["dates_article_id"] = article_id
+
+    # --- Load saved CSV values ---
+    saved_start = None
+    saved_end = None
 
     if article_id in feedback_df["article_id"].values:
-        csv_start = feedback_df.loc[feedback_df["article_id"] == article_id, "new_start_date"].values[0]
-        csv_end = feedback_df.loc[feedback_df["article_id"] == article_id, "new_end_date"].values[0]
+        row = feedback_df.loc[feedback_df["article_id"] == article_id].iloc[0]
 
-        if csv_start and pd.notna(csv_start) and csv_start != "":
-            start_input_value = datetime.fromisoformat(csv_start).date()
+        if isinstance(row["new_start_date"], str) and row["new_start_date"].strip():
+            saved_start = datetime.fromisoformat(row["new_start_date"]).date()
 
-        if csv_end and pd.notna(csv_end) and csv_end != "":
-            end_input_value = datetime.fromisoformat(csv_end).date()
+        if isinstance(row["new_end_date"], str) and row["new_end_date"].strip():
+            saved_end = datetime.fromisoformat(row["new_end_date"]).date()
 
+    # --- FORCE CLEAR FLAGS (ensures immediate empty UI after clearing) ---
+    if st.session_state.pop(f"force_clear_start_{article_id}", False):
+        saved_start = None
+        st.session_state.pop(start_key, None)
 
+    if st.session_state.pop(f"force_clear_end_{article_id}", False):
+        saved_end = None
+        st.session_state.pop(end_key, None)
+
+    # =================
     # START DATE
+    # =================
     st.markdown(f"**Predicted Start Date:** {start_date}")
     col_s1, col_s2 = st.columns([4, 1])
+
     with col_s1:
         new_start = st.date_input(
-            " ",  # empty label to avoid vertical shift
-            value=start_input_value,
-            key="new_start_date",
-            label_visibility="collapsed"
+            " ",
+            value=saved_start,
+            key=start_key,
+            label_visibility="collapsed",
         )
+
     with col_s2:
-        clear_start_clicked = st.button("↩️ Clear", key="clear_start_btn", use_container_width=True)
-    
-        # Force vertical centering of the button relative to input
-        st.markdown(
-            """
-            <style>
-            div[data-testid="column"]:has(button[data-testid="baseButton-clear_start_btn"]) {
-                display: flex;
-                align-items: center;
-                justify-content: center;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-    
-        if clear_start_clicked:
-            df = pd.read_csv(FEEDBACK_FILE, dtype="object")
+        if st.button("↩️ Clear", key=f"clear_start_{article_id}", use_container_width=True):
+
+            df = pd.read_csv(FEEDBACK_FILE, dtype=str) if FEEDBACK_FILE.exists() else \
+                 pd.DataFrame(columns=["article_id","visible","new_start_date","new_end_date","notes"])
+
             if article_id not in df["article_id"].values:
-                st.session_state["date_update_error"] = (
-                    "Cannot clear start date yet — select Yes/Unsure/No or add a note first."
-                )
-            else:
-                df.loc[df["article_id"] == article_id, "new_start_date"] = ""
-                df.to_csv(FEEDBACK_FILE, index=False)
-                st.session_state["date_update_success"] = "Cleared corrected start date."
+                df.loc[len(df)] = [article_id, None, "", "", ""]
+
+            df.loc[df["article_id"] == article_id, "new_start_date"] = ""
+            df.to_csv(FEEDBACK_FILE, index=False)
+
+            st.session_state[f"force_clear_start_{article_id}"] = True
+            st.session_state["date_message"] = {
+                "type": "success",
+                "text": "Cleared corrected start date."
+            }
             st.rerun()
 
+    # =================
     # END DATE
+    # =================
     st.markdown(f"**Predicted End Date:** {end_date}")
     col_e1, col_e2 = st.columns([4, 1])
+
     with col_e1:
         new_end = st.date_input(
             " ",
-            value=end_input_value,
-            key="new_end_date",
-            label_visibility="collapsed"
+            value=saved_end,
+            key=end_key,
+            label_visibility="collapsed",
         )
+
     with col_e2:
-        clear_end_clicked = st.button("↩️ Clear", key="clear_end_btn", use_container_width=True)
-    
-        st.markdown(
-            """
-            <style>
-            div[data-testid="column"]:has(button[data-testid="baseButton-clear_end_btn"]) {
-                display: flex;
-                align-items: center;
-                justify-content: center;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-    
-        if clear_end_clicked:
-            df = pd.read_csv(FEEDBACK_FILE, dtype="object")
+        if st.button("↩️ Clear", key=f"clear_end_{article_id}", use_container_width=True):
+
+            df = pd.read_csv(FEEDBACK_FILE, dtype=str) if FEEDBACK_FILE.exists() else \
+                 pd.DataFrame(columns=["article_id","visible","new_start_date","new_end_date","notes"])
+
             if article_id not in df["article_id"].values:
-                st.session_state["date_update_error"] = (
-                    "Cannot clear end date yet — select Yes/Unsure/No or add a note first."
-                )
-            else:
-                df.loc[df["article_id"] == article_id, "new_end_date"] = ""
-                df.to_csv(FEEDBACK_FILE, index=False)
-                st.session_state["date_update_success"] = "Cleared corrected end date."
+                df.loc[len(df)] = [article_id, None, "", "", ""]
+
+            df.loc[df["article_id"] == article_id, "new_end_date"] = ""
+            df.to_csv(FEEDBACK_FILE, index=False)
+
+            st.session_state[f"force_clear_end_{article_id}"] = True
+            st.session_state["date_message"] = {
+                "type": "success",
+                "text": "Cleared corrected end date."
+            }
             st.rerun()
 
+    # =================
+    # SAVE DATES
+    # =================
+    if st.button("💾 Save Corrected Dates", key=f"save_dates_{article_id}", use_container_width=True):
 
-    # Final Save Button
-    user_start_date = new_start.isoformat() if new_start else None
-    user_end_date = new_end.isoformat() if new_end else None
+        visible_val = None
+        if article_id in feedback_df["article_id"].values:
+            visible_val = feedback_df.loc[
+                feedback_df["article_id"] == article_id, "visible"
+            ].values[0]
 
-    if st.button("💾 Save Corrected Dates", key="save_corrected_dates", use_container_width=True):
-        df = pd.read_csv(FEEDBACK_FILE, dtype="object")
+        if visible_val not in ("Yes", "No", "Unsure"):
+            st.session_state["date_message"] = {
+                "type": "error",
+                "text": "ERROR: Please select whether the event is visible before saving dates."
+            }
+            st.rerun()
+
+        df = pd.read_csv(FEEDBACK_FILE, dtype=str) if FEEDBACK_FILE.exists() else \
+             pd.DataFrame(columns=["article_id","visible","new_start_date","new_end_date","notes"])
+
         if article_id not in df["article_id"].values:
-            st.session_state["date_update_error"] = "Cannot save — select Yes/Unsure/No first."
-        else:
-            df.loc[df["article_id"] == article_id, "new_start_date"] = user_start_date or ""
-            df.loc[df["article_id"] == article_id, "new_end_date"] = user_end_date or ""
-            df.to_csv(FEEDBACK_FILE, index=False)
-            st.session_state["date_update_success"] = "Submitted corrected dates."
+            df.loc[len(df)] = [article_id, visible_val, "", "", ""]
+
+        df.loc[df["article_id"] == article_id, "new_start_date"] = (
+            new_start.isoformat() if new_start else ""
+        )
+        df.loc[df["article_id"] == article_id, "new_end_date"] = (
+            new_end.isoformat() if new_end else ""
+        )
+
+        df.to_csv(FEEDBACK_FILE, index=False)
+
+        st.session_state["date_message"] = {
+            "type": "success",
+            "text": "Saved corrected dates."
+        }
         st.rerun()
 
-# Persistent messages
-msg = st.session_state.get("date_update_success")
-if msg:
-    st.success(msg)
-    st.session_state["date_update_success"] = None
 
-err = st.session_state.get("date_update_error")
-if err:
-    st.error(err)
-    st.session_state["date_update_error"] = None
+# =========================
+# Persistent popup message
+# =========================
+msg = st.session_state.get("date_message")
+if msg:
+    if msg["type"] == "error":
+        st.error(msg["text"])
+    else:
+        st.success(msg["text"])
+
+    st.session_state["date_message"] = None
+
 
 
 # Notes
@@ -521,7 +554,7 @@ if st.button(f"💾 Submit Notes", key=f"submit_{sat_source}"):
 if st.session_state.get("note_update_success"):
     st.success(f"Submitted notes.")
     st.session_state["note_update_success"] = False
-                
+
 
 # =========================
 # Navigation
@@ -538,4 +571,3 @@ with col_next:
     if st.button("Next Article ➡️", use_container_width=True):
         st.session_state.article_index = (st.session_state.article_index + 1) % len(articles)
         st.rerun()
-
