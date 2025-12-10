@@ -6,7 +6,7 @@ import pandas as pd
 from datetime import datetime
 import urllib.parse
 
-DATE = '202301'
+DATE = '202301_samples'
 VAL_DIR = Path(f"data/{DATE}")
 FEEDBACK_FILE = Path(f"feedback/{DATE}/feedback.csv")
 
@@ -154,12 +154,12 @@ def undo_feedback(article_id):
             df.to_csv(FEEDBACK_FILE, index=False)
     #clear_cache()
 
-# =========================
-# UI
-# =========================
+
+### UI start
 st.title("Sky Scraper Validation")
 
 articles = get_valid_articles()
+articles = sorted(articles, key=lambda x: x[0])
 if not articles:
     st.warning("No articles with metadata.json found.")
     st.stop()
@@ -187,32 +187,36 @@ st.markdown(
     f"**Validation Progress:** {len(fully_validated['article_id'].unique())} of {len(articles)} articles fully reviewed"
 )
 
-# Jump control
+### Jump control (1-based UI, 0-based internal index)
 label_col, input_col, button_col, _ = st.columns([1.7, 1, 1, 6])
+if "article_index" not in st.session_state:
+    st.session_state.article_index = 0
+
 with label_col:
     st.markdown("**Jump to article:**")
+
 with input_col:
-    jump_index = st.number_input(
+    jump_index_ui = st.number_input(
         label="Jump to article index",
-        min_value=0,
-        max_value=len(articles) - 1,
-        value=st.session_state.get("article_index", 0),
+        min_value=1,
+        max_value=len(articles),
+        value=st.session_state.article_index + 1,  # convert to UI index
         step=1,
         label_visibility="collapsed",
         key="jump_input",
     )
+
 with button_col:
     if st.button("Go", key="jump_button"):
-        st.session_state.article_index = jump_index
+        # Convert back to 0-based index
+        st.session_state.article_index = jump_index_ui - 1
         st.rerun()
 
 st.markdown("---")
 
-if "article_index" not in st.session_state:
-    st.session_state.article_index = 0
-
 article_id, metadata = articles[st.session_state.article_index]
-st.markdown(f"### Article ID: `{article_id}`")
+current_idx = st.session_state.article_index + 1
+st.markdown(f"### Article ID: `{article_id}` ({current_idx}/{len(articles)})")
 
 article_text = metadata.get("article_content", "")
 if article_text:
@@ -276,10 +280,8 @@ encoded_query = urllib.parse.quote(location_name)
 maps_link = f"https://www.google.com/maps/search/?api=1&query={encoded_query}"
 st.markdown(f"[📍 {location_name} (Reference)]({maps_link})")
 
-# =========================
-# Imagery section
-# =========================
 
+### Imagery section
 st.subheader(f"{sat_source.capitalize()} Imagery")
 
 # 1) Imagery gallery (with per-image timeline captions from this source rewrite metadata)
@@ -384,21 +386,21 @@ with col_undo:
             st.rerun()
 
 
-# Allow correction of start/end dates
+### Start/end dates
 st.markdown("#### Correct event start/end dates (if applicable)")
 with st.expander("Correct Event Dates", expanded=True):
 
     start_key = f"start_date_{article_id}"
     end_key   = f"end_date_{article_id}"
 
-    # --- Clear widget state ONLY when article changes ---
+    # Clear widget state ONLY when article changes
     last_article = st.session_state.get("dates_article_id")
     if last_article != article_id:
         st.session_state.pop(start_key, None)
         st.session_state.pop(end_key, None)
         st.session_state["dates_article_id"] = article_id
 
-    # --- Load saved CSV values ---
+    # Load saved CSV values
     saved_start = None
     saved_end = None
 
@@ -411,7 +413,7 @@ with st.expander("Correct Event Dates", expanded=True):
         if isinstance(row["new_end_date"], str) and row["new_end_date"].strip():
             saved_end = datetime.fromisoformat(row["new_end_date"]).date()
 
-    # --- FORCE CLEAR FLAGS (ensures immediate empty UI after clearing) ---
+    # FORCE CLEAR FLAGS
     if st.session_state.pop(f"force_clear_start_{article_id}", False):
         saved_start = None
         st.session_state.pop(start_key, None)
@@ -420,9 +422,7 @@ with st.expander("Correct Event Dates", expanded=True):
         saved_end = None
         st.session_state.pop(end_key, None)
 
-    # =================
     # START DATE
-    # =================
     st.markdown(f"**Predicted Start Date:** {start_date}")
     col_s1, col_s2 = st.columns([4, 1])
 
@@ -453,9 +453,7 @@ with st.expander("Correct Event Dates", expanded=True):
             }
             st.rerun()
 
-    # =================
     # END DATE
-    # =================
     st.markdown(f"**Predicted End Date:** {end_date}")
     col_e1, col_e2 = st.columns([4, 1])
 
@@ -486,9 +484,7 @@ with st.expander("Correct Event Dates", expanded=True):
             }
             st.rerun()
 
-    # =================
     # SAVE DATES
-    # =================
     if st.button("💾 Save Corrected Dates", key=f"save_dates_{article_id}", use_container_width=True):
 
         visible_val = None
@@ -525,10 +521,6 @@ with st.expander("Correct Event Dates", expanded=True):
         }
         st.rerun()
 
-
-# =========================
-# Persistent popup message
-# =========================
 msg = st.session_state.get("date_message")
 if msg:
     if msg["type"] == "error":
@@ -539,26 +531,46 @@ if msg:
     st.session_state["date_message"] = None
 
 
+### Notes
+note_key = f"feedback_note_{article_id}"
 
-# Notes
-note = st.text_area(f"💬 Feedback Notes (Optional)", value=existing_note, key=f"{sat_source}_note", height=100)
+# Clear stale notes when switching articles
+last_note_article = st.session_state.get("note_article_id")
+if last_note_article != article_id:
+    st.session_state.pop(note_key, None)
+    st.session_state["note_article_id"] = article_id
 
-# prevents clearing accept/reject when saving notes
-if st.button(f"💾 Submit Notes", key=f"submit_{sat_source}"):
+# Load note from CSV ONLY if it exists
+existing_note = ""
+if article_id in feedback_df["article_id"].values:
+    saved_note = feedback_df.loc[
+        feedback_df["article_id"] == article_id, "notes"
+    ].values[0]
+
+    if isinstance(saved_note, str) and saved_note.strip():
+        existing_note = saved_note
+
+# Notes text area (empty unless CSV has content)
+note = st.text_area(
+    "💬 Feedback Notes (Optional)",
+    value=existing_note,
+    key=note_key,
+    height=100
+)
+
+# Save notes
+if st.button("💾 Submit Notes", key=f"submit_note_{article_id}"):
+
     write_feedback(article_id, existing_visible, note)
-    st.success(f"Submitted notes.")
-    st.session_state["note_update_success"] = True
-    st.rerun()  # optional, refresh immediately so UI reflects changes
 
-# Persistent success message
-if st.session_state.get("note_update_success"):
-    st.success(f"Submitted notes.")
-    st.session_state["note_update_success"] = False
+    st.session_state["date_message"] = {
+        "type": "success",
+        "text": "Submitted notes."
+    }
+    st.rerun()
 
 
-# =========================
-# Navigation
-# =========================
+### Navigation
 st.markdown("---")
 spacer1, col_prev, col_next, spacer2 = st.columns([1, 3, 3, 1])
 
