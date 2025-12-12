@@ -14,6 +14,8 @@ source .venv/bin/activate
 uv sync
 ```
 
+If you use windows, run `call .venv/Scripts/activate.bat`
+
 ## Usage
 * Unzip data into the `data/` folder
 * Adjust `DATE` variable in `validation_app.py` to match
@@ -22,4 +24,5 @@ uv sync
 streamlit run validation_app.py
 ```
 * Ensure that feedback saves to the `feedback/` folder!
+
 
